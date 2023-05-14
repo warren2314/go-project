@@ -10,14 +10,21 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
 
 var (
-	jwtSecret     = os.Getenv("JWT_SECRET")
-	sessionSecret = os.Getenv("SESSION_SECRET")
-	store         = sessions.NewCookieStore([]byte(sessionSecret))
+	jwtSecret       = os.Getenv("JWT_SECRET")
+	sessionSecret   = os.Getenv("SESSION_SECRET")
+	store           = sessions.NewCookieStore([]byte(sessionSecret))
+	usernameRegexp  = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+	passwordRegexp  = regexp.MustCompile(`^[a-zA-Z0-9@#$%^&+=!]{8,}$`)
+	uppercaseRegexp = regexp.MustCompile(`[A-Z]`)
+	lowercaseRegexp = regexp.MustCompile(`[a-z]`)
+	numberRegexp    = regexp.MustCompile(`[0-9]`)
+	specialRegexp   = regexp.MustCompile(`[@#$%^&+=]`)
 )
 
 func main() {
@@ -26,23 +33,48 @@ func main() {
 		log.Fatalf("Error loading .env file")
 	}
 
+	store.Options = &sessions.Options{
+		MaxAge:   3600, //Session expiration time
+		HttpOnly: true,
+	}
+
 	router := gin.Default()
 	router.Static("/static", "./static")
 
 	router.LoadHTMLGlob("templates/*")
 
 	router.GET("/", indexHandler)
+	router.GET("/index", indexHandler)
 	router.GET("/login", loginHandler)
 	router.POST("/login", loginPostHandler)
 	router.GET("/logout", logoutHandler)
 	router.POST("/configure-firewall", configureFirewallHandler)
 	router.POST("/configure-ssh", configureSSHHandler)
-	router.POST("/adduser", jwtAuthMiddleware(), addUserHandler)
+	//router.POST("/adduser", jwtAuthMiddleware(), addUserHandler)
 	router.GET("/adduser", showAddUserForm)
-	router.POST("/api/adduser", addUserAPIHandler)
+	router.POST("/api/adduser", jwtAuthMiddleware(), addUserAPIHandler)
 
 	router.Run(":8080")
 
+}
+
+func validatePassword(password string) bool {
+	if len(password) < 8 {
+		return false
+	}
+	if !uppercaseRegexp.MatchString(password) {
+		return false
+	}
+	if !lowercaseRegexp.MatchString(password) {
+		return false
+	}
+	if !numberRegexp.MatchString(password) {
+		return false
+	}
+	if !specialRegexp.MatchString(password) {
+		return false
+	}
+	return true
 }
 
 func generateJWTToken(username string) (string, error) {
@@ -73,26 +105,43 @@ func loginHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "login.html", nil)
 }
 
+func isMatch(pattern, value string) bool {
+	match, _ := regexp.MatchString(pattern, value)
+	return match
+}
+
 func loginPostHandler(c *gin.Context) {
-	username := c.PostForm("username")
-	password := c.PostForm("password")
+	formData := struct {
+		Username string `form:"username" binding:"required"`
+		Password string `form:"password" binding:"required"`
+	}{}
+
+	if err := c.ShouldBind(&formData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
 
 	webUsername := os.Getenv("WEB_USERNAME")
 	webPassword := os.Getenv("WEB_PASSWORD")
 
-	if username != webUsername || password != webPassword {
+	if !usernameRegexp.MatchString(formData.Username) || !passwordRegexp.MatchString(formData.Password) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or password format"})
+		return
+	}
+
+	if formData.Username != webUsername || formData.Password != webPassword {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or password"})
 		return
 	}
 
-	token, err := generateJWTToken(username)
+	token, err := generateJWTToken(formData.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate a token"})
 		return
 	}
-	// Set Cookie usage
+
 	c.SetCookie("jwt", token, 3600, "/", "", false, true)
-	c.Redirect(http.StatusSeeOther, "/adduser")
+	c.Redirect(http.StatusSeeOther, "/index")
 }
 
 func logoutHandler(c *gin.Context) {
@@ -116,11 +165,23 @@ func showAddUserForm(c *gin.Context) {
 }
 
 func addUserAPIHandler(c *gin.Context) {
-	username := c.PostForm("username")
-	password := c.PostForm("password")
+	formData := struct {
+		Username string `form:"username" binding:"required"`
+		Password string `form:"password" binding:"required"`
+	}{}
+
+	if err := c.ShouldBind(&formData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if !usernameRegexp.MatchString(formData.Username) || !passwordRegexp.MatchString(formData.Password) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or password format"})
+		return
+	}
 
 	// Execute the adduser command with sudo privileges
-	cmd := exec.Command("sudo", "adduser", "--quiet", "--disabled-password", "--gecos", "", username)
+	cmd := exec.Command("sudo", "adduser", "--quiet", "--disabled-password", "--gecos", "", formData.Username)
 	err := cmd.Run()
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Failed to add user")
@@ -128,7 +189,7 @@ func addUserAPIHandler(c *gin.Context) {
 	}
 
 	// Set the password using the chpasswd command
-	cmd = exec.Command("echo", fmt.Sprintf("%s:%s", username, password))
+	cmd = exec.Command("echo", fmt.Sprintf("%s:%s", formData.Username, formData.Password))
 	out, err := cmd.Output()
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Failed to set password")
@@ -144,35 +205,6 @@ func addUserAPIHandler(c *gin.Context) {
 	}
 
 	c.String(http.StatusOK, "User added successfully")
-}
-
-func addUserHandler(c *gin.Context) {
-	username := c.PostForm("username")
-	password := c.PostForm("password")
-
-	cmd := exec.Command("sudo", "adduser", "--quiet", "--disabled-password", "--gecos", "", username)
-	err := cmd.Run()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add user"})
-		return
-	}
-
-	cmd = exec.Command("echo", fmt.Sprintf("%s:%s", username, password))
-	out, err := cmd.Output()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set password"})
-		return
-	}
-
-	cmd = exec.Command("sudo", "chpasswd")
-	cmd.Stdin = strings.NewReader(string(out))
-	err = cmd.Run()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set password"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "User added successfully"})
 }
 
 func jwtAuthMiddleware() gin.HandlerFunc {
