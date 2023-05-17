@@ -5,6 +5,20 @@
     <title>Title</title>
 </head>
 <body>
-
+<script>
+$.ajax({
+url: "/api/logout",
+type: "POST",
+success: function(response) {
+// check if the redirect property exists
+if(response.redirect) {
+// show the message
+alert(response.message);
+// perform the redirection
+window.location.href = response.redirect;
+}
+}
+});
+</script>
 </body>
 </html>

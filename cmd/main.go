@@ -77,7 +77,7 @@ func main() {
 	router.Static("/static", "./static")
 
 	router.GET("/api/adduser", jwtAuthMiddleware(), addUserAPIHandler)
-	router.POST("/api/adduser", addUserAPIHandler)
+	router.POST("/api/adduser", jwtAuthMiddleware(), addUserAPIHandler)
 
 	router.LoadHTMLGlob("templates/*")
 
@@ -85,7 +85,7 @@ func main() {
 	router.GET("/adduser", showAddUserForm)
 	router.GET("/login", loginHandler)
 	router.POST("/login", loginPostHandler)
-	router.GET("/logout", logoutHandler)
+	router.GET("/api/logout", logoutAPIHandler)
 	router.POST("/configure-firewall", configureFirewallHandler)
 	router.GET("/configure_ssh", configureSSHHandler)
 	router.POST("/api/addssh", jwtAuthMiddleware(), addSSHAPIHandler)
@@ -181,12 +181,22 @@ func loginPostHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "index.html", nil)
 }
 
-func logoutHandler(c *gin.Context) {
+func logoutAPIHandler(c *gin.Context) {
+	// Clear the JWT cookie
+	c.SetCookie("jwt", "", -1, "/", "", false, true)
+
+	// Clear the session
 	session, _ := store.Get(c.Request, "session")
 	session.Values["authenticated"] = false
-	session.Save(c.Request, c.Writer)
+	session.Options.MaxAge = -1
+	err := session.Save(c.Request, c.Writer)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear session"})
+		return
+	}
 
-	c.Redirect(http.StatusFound, "/")
+	// Redirect to the home page with a logged out message
+	c.JSON(http.StatusOK, gin.H{"redirect": "/", "message": "Logged out successfully"})
 }
 
 func configureFirewallHandler(c *gin.Context) {
