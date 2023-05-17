@@ -1,10 +1,34 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Title</title>
+    <title>Add SSH Key</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $("#add-ssh-key-form").on("submit", function(e) {
+                e.preventDefault();
+                var username = $('#username').val();
+
+                $.ajax({
+                    url: "/api/users/" + username + "/addsshkey",
+                    type: "POST",
+                    success: function(data) {
+                        alert("SSH key added successfully for user: " + username);
+                    },
+                    error: function(err) {
+                        alert("Error adding SSH key: " + err.responseText);
+                    }
+                });
+            });
+        });
+    </script>
 </head>
 <body>
-
+<form id="add-ssh-key-form">
+    <label for="username">Username:</label><br>
+    <input type="text" id="username" name="username" required><br>
+    <input type="submit" value="Add SSH Key">
+</form>
 </body>
 </html>
+
