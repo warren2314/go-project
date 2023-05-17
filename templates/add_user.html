@@ -42,7 +42,7 @@
 </nav>
 <main>
 <form id="user-form" action="/api/adduser" method="post">
-    <input type="hidden" name="csrfToken" value="{{ .csrfToken }}">
+    <input type="hidden" name="csrfToken" id="csrfToken" value="{{ .csrfToken }}">
     <label for="username">Username:</label></br>
     <input type="text" id="username" name="username"></br>
     <label for="password">Password:</label></br>

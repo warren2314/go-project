@@ -19,6 +19,7 @@
             <label for="password" class="form-label">Password</label>
             <input type="password" class="form-control" id="password" name="password" required>
         </div>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <button type="submit" class="btn btn-primary">Login</button>
     </form>
 </div>
