@@ -17,10 +17,10 @@ function setupAjaxForm(formSelector, resultSelector) {
 
                 if (data.success) {
                     // Show a success message
-                    $(resultSelector).removeClass().addClass('alert alert-success').html(data.message).fadeIn().delay(2000).fadeOut();
+                    $(resultSelector).removeClass().addClass('alert alert-success').html(data.message).fadeIn().delay(3000).fadeOut();
                 } else {
                     // Show an error message
-                    $(resultSelector).removeClass().addClass('alert alert-danger').html(data.message).fadeIn().delay(2000).fadeOut();
+                    $(resultSelector).removeClass().addClass('alert alert-danger').html(data.message).fadeIn().delay(3000).fadeOut();
                 }
             }
         });

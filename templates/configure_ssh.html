@@ -1,34 +1,68 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <title>Add SSH Key</title>
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-    <script>
-        $(document).ready(function() {
-            $("#add-ssh-key-form").on("submit", function(e) {
-                e.preventDefault();
-                var username = $('#username').val();
+<html lang="eng">
 
-                $.ajax({
-                    url: "/api/users/" + username + "/addsshkey",
-                    type: "POST",
-                    success: function(data) {
-                        alert("SSH key added successfully for user: " + username);
-                    },
-                    error: function(err) {
-                        alert("Error adding SSH key: " + err.responseText);
-                    }
-                });
-            });
-        });
-    </script>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scaled=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Web Interface Project</title>
 </head>
+
 <body>
-<form id="add-ssh-key-form">
-    <label for="username">Username:</label><br>
-    <input type="text" id="username" name="username" required><br>
-    <input type="submit" value="Add SSH Key">
+<header>
+    <h2>Please choose what you want to do</h2>
+</header>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">Warren Go App</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/login">Login</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/logout">Logout</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/configure_firewall">Configure Firewall</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/configure_ssh">Configure SSH</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/adduser">Add User</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+<main>
+<form id="ssh-form" action="/api/addssh" method="post">
+    <input type="hidden" name="csrfToken" id="csrfToken" value="{{ .csrfToken }}">
+    <label for="username">Username:</label></br>
+    <input type="text" id="username" name="username"></br>
+    <label for="password">SSH Password (must be 16 characters long, include upper and lower case letters, numbers, and one of *&!"):</label></br>
+    <input type="password" id="password" name="password"></br>
+    <input type="submit" value="Enable SSH">
 </form>
+    <div id="alert" class="alert" role="alert" style="display: none;"></div>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="/static/js/ajaxFormSubmit.js"></script>
+
+    <script>
+        setupAjaxForm('#user-form', '#alert')
+    </script>
+</main>
+<!-- Add your footer content here -->
+</footer>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
+
 </html>
 

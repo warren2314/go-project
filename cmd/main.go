@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/ssh"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -51,6 +50,18 @@ func generateCSRFToken() string {
 	return token
 }
 
+// Check if a user is present in /etc/passwd
+func validateUser(username string) (bool, error) {
+	_, err := user.Lookup(username)
+	if err != nil {
+		if _, ok := err.(user.UnknownUserError); ok {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -76,7 +87,8 @@ func main() {
 	router.POST("/login", loginPostHandler)
 	router.GET("/logout", logoutHandler)
 	router.POST("/configure-firewall", configureFirewallHandler)
-	router.POST("/configure-ssh", configureSSHHandler)
+	router.GET("/configure_ssh", configureSSHHandler)
+	router.POST("/api/addssh", jwtAuthMiddleware(), addSSHAPIHandler)
 
 	router.Run(":8080")
 }
@@ -200,18 +212,61 @@ func addSSHAPIHandler(c *gin.Context) {
 	}
 
 	sshDir := filepath.Join("/home", username, ".ssh")
-	if err := os.MkdirAll(sshDir, 0700); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to create .ssh directory"})
+
+	cmd := exec.Command("sudo", "mkdir", "-p", sshDir)
+	err = cmd.Run()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to create .ssh directory: %v", err)})
+		return
+	}
+
+	cmd = exec.Command("sudo", "chmod", "700", sshDir)
+	err = cmd.Run()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to set permissions on .ssh directory: %v", err)})
 		return
 	}
 
 	authorizedKeysFile := filepath.Join(sshDir, "authorized_keys")
-	if err := ioutil.WriteFile(authorizedKeysFile, []byte(publicKey+"\n"), 0600); err != nil {
+	cmd = exec.Command("sudo", "sh", "-c", fmt.Sprintf("echo '%s' > %s", publicKey, authorizedKeysFile))
+	err = cmd.Run()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to write public key to authorized_keys file"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "SSH access added successfully", "private_key": privateKey})
+	cmd = exec.Command("sudo", "chmod", "600", authorizedKeysFile)
+	err = cmd.Run()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to set permissions on authorized_keys file: %v", err)})
+		return
+	}
+
+	cmd = exec.Command("sudo", "mkdir", "-p", "/root/.ssh")
+	err = cmd.Run()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to create .ssh directory in root: %v", err)})
+		return
+	}
+
+	cmd = exec.Command("sudo", "chmod", "700", "/root/.ssh")
+	err = cmd.Run()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to set permissions on root's .ssh directory: %v", err)})
+		return
+	}
+
+	privateKeyFile := filepath.Join("/root/.ssh", username+"_id_rsa")
+	commandStr := fmt.Sprintf("echo -en '%s' > %s", privateKey, privateKeyFile)
+	fmt.Println("Executing command:", commandStr) // Print the command
+	cmd = exec.Command("sudo", "sh", "-c", commandStr)
+	err = cmd.Run()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to write private key to file: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "SSH access added successfully"})
 }
 
 func generateSSHKeyPair() (privateKeyString string, publicKeyString string, err error) {
