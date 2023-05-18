@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -13,12 +14,14 @@ import (
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/ssh"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -85,10 +88,12 @@ func main() {
 	router.GET("/adduser", showAddUserForm)
 	router.GET("/login", loginHandler)
 	router.POST("/login", loginPostHandler)
-	router.GET("/api/logout", logoutAPIHandler)
-	router.POST("/configure-firewall", configureFirewallHandler)
+	router.GET("/logout", logoutAPIHandler)
+	router.POST("/logout", logoutAPIHandler)
 	router.GET("/configure_ssh", configureSSHHandler)
 	router.POST("/api/addssh", jwtAuthMiddleware(), addSSHAPIHandler)
+	router.POST("/api/configure_firewall", jwtAuthMiddleware(), configureFirewallAPIHandler)
+	router.GET("/configure_firewall", configureFirewallHandler)
 
 	router.Run(":8080")
 }
@@ -134,7 +139,7 @@ func generateJWTToken(username string, role string) (string, error) {
 }
 
 func indexHandler(c *gin.Context) {
-	c.HTML(http.StatusOK, "index.html", nil)
+	c.HTML(http.StatusOK, "login.html", nil)
 }
 
 func loginHandler(c *gin.Context) {
@@ -182,32 +187,178 @@ func loginPostHandler(c *gin.Context) {
 }
 
 func logoutAPIHandler(c *gin.Context) {
+	fmt.Println("Inside logoutAPIHandler")
+
 	// Clear the JWT cookie
 	c.SetCookie("jwt", "", -1, "/", "", false, true)
+	fmt.Println("JWT cookie cleared")
 
-	// Clear the session
-	session, _ := store.Get(c.Request, "session")
-	session.Values["authenticated"] = false
-	session.Options.MaxAge = -1
-	err := session.Save(c.Request, c.Writer)
+	// Get the session
+	session, err := store.Get(c.Request, "session")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear session"})
+		fmt.Println("Error getting session:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get session"})
 		return
 	}
 
-	// Redirect to the home page with a logged out message
-	c.JSON(http.StatusOK, gin.H{"redirect": "/", "message": "Logged out successfully"})
+	// Clear the session
+	session.Values["authenticated"] = false
+	session.Options.MaxAge = -1
+	err = session.Save(c.Request, c.Writer)
+	if err != nil {
+		fmt.Println("Error saving session:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear session"})
+		return
+	}
+	fmt.Println("Session cleared")
+
+	// Redirect to the login page
+	c.Redirect(http.StatusTemporaryRedirect, "/login")
+}
+
+type FirewallRule struct {
+	Protocol  string `json:"Protocol"`
+	IpAddress string `json:"IpAddress"`
+	Port      string `json:"Port"`
+	Action    string `json:"Action"`
+}
+
+func ensureFirewallEnabled() error {
+	cmd := exec.Command("sudo", "ufw", "status")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return fmt.Errorf("could not check ufw status: %w", err)
+	}
+
+	if strings.Contains(string(output), "inactive") {
+		cmd := exec.Command("sudo", "ufw", "enable")
+		err = cmd.Run()
+
+		if err != nil {
+			return fmt.Errorf("could not enable ufw: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func configureFirewallAPIHandler(c *gin.Context) {
+	csrfToken := c.GetHeader("X-CSRF-Token")
+	if csrfToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Missing CSRF token"})
+		return
+	}
+
+	session, _ := store.Get(c.Request, "session")
+	if session.Values["csrf"] != csrfToken {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid CSRF token"})
+		return
+	}
+	var rule FirewallRule
+
+	if err := c.ShouldBindJSON(&rule); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	// IP check
+	ip := net.ParseIP(rule.IpAddress)
+	if ip == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IP address"})
+		return
+	}
+
+	// Port check
+	port, err := strconv.Atoi(rule.Port)
+	if err != nil || port < 1 || port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid port number"})
+		return
+	}
+
+	// Ensure that the firewall is enabled
+	err = ensureFirewallEnabled()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to ensure firewall is enabled: %v", err)})
+		return
+	}
+
+	// Run the ufw command to add the rule
+	cmd := exec.Command("sudo", "ufw", rule.Action, "from", rule.IpAddress, "to", "any", "port", rule.Port)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Printf("stdout: %q\n", stdout.String())
+		log.Printf("stderr: %q\n", stderr.String())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to configure firewall: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Firewall configured successfully"})
 }
 
 func configureFirewallHandler(c *gin.Context) {
-	c.HTML(http.StatusOK, "configure_firewall.html", nil)
+	// Generate CSRF token
+	csrfToken := generateCSRFToken()
+
+	// Get session
+	session, _ := store.Get(c.Request, "session")
+
+	// Store CSRF token in session
+	session.Values["csrf"] = csrfToken
+	err := session.Save(c.Request, c.Writer)
+	if err != nil {
+		// handle error
+		log.Printf("Error saving session: %v", err)
+		return
+	}
+	// Log the token so I can compare
+	log.Printf("CSRF Token: %s", csrfToken)
+
+	// Pass the CSRF token to the template
+	c.HTML(http.StatusOK, "configure_firewall.html", gin.H{
+		"csrfToken": csrfToken,
+	})
 }
 
 func configureSSHHandler(c *gin.Context) {
-	c.HTML(http.StatusOK, "configure_ssh.html", nil)
+	// Generate CSRF token
+	csrfToken := generateCSRFToken()
+
+	// Get session
+	session, _ := store.Get(c.Request, "session")
+
+	// Store CSRF token in session
+	session.Values["csrf"] = csrfToken
+	err := session.Save(c.Request, c.Writer)
+	if err != nil {
+		// handle error
+		log.Printf("Error saving session: %v", err)
+		return
+	}
+	// Log the token so I can compare
+	log.Printf("CSRF Token: %s", csrfToken)
+
+	// Pass the CSRF token to the template
+	c.HTML(http.StatusOK, "configure_ssh.html", gin.H{
+		"csrfToken": csrfToken,
+	})
 }
 
 func addSSHAPIHandler(c *gin.Context) {
+	csrfToken := c.GetHeader("X-CSRF-Token")
+	if csrfToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Missing CSRF token"})
+		return
+	}
+
+	session, _ := store.Get(c.Request, "session")
+	if session.Values["csrf"] != csrfToken {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid CSRF token"})
+		return
+	}
 	username := c.PostForm("username")
 
 	if _, err := user.Lookup(username); err != nil {
@@ -312,6 +463,8 @@ func showAddUserForm(c *gin.Context) {
 		log.Printf("Error saving session: %v", err)
 		return
 	}
+	// Log the token so I can compare
+	log.Printf("CSRF Token: %s", csrfToken)
 
 	// Pass the CSRF token to the template
 	c.HTML(http.StatusOK, "add_user.html", gin.H{
