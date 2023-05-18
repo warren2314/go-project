@@ -12,34 +12,8 @@
 <header>
     <h2>Please choose what you want to do</h2>
 </header>
-
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="#">Warren Go App</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav">
-                <li class="nav-item">
-                    <a class="nav-link" href="/login">Login</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="/logout">Logout</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="/configure_firewall">Configure Firewall</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="/configure_ssh">Configure SSH</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="/adduser">Add User</a>
-                </li>
-            </ul>
-        </div>
-    </div>
-</nav>
+<body>
+{{ template "navbar.html" . }}
 <main>
 <form id="user-form" action="/api/adduser" method="post">
     <input type="hidden" name="csrfToken" id="csrfToken" value="{{ .csrfToken }}">
@@ -63,5 +37,4 @@
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
-
 </html>
